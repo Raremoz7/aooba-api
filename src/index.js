@@ -1000,6 +1000,115 @@ app.get('/api/cardapio', async (req, res) => {
   }
 });
 
+// Exportar cardápio completo (categorias + produtos + fotos em base64)
+app.get('/api/admin/cardapio/exportar', async (req, res) => {
+  try {
+    const bar = await prisma.bar.findFirst();
+    if (!bar) return res.status(400).json({ error: 'Bar não configurado' });
+
+    const categorias = await prisma.produtoCategoria.findMany({
+      where: { bar_id: bar.id },
+      include: { produtos: { include: { opcoes: true } } },
+      orderBy: { ordem: 'asc' }
+    });
+
+    const payload = categorias.map(cat => ({
+      ...cat,
+      produtos: cat.produtos.map(p => {
+        let foto_base64 = null, foto_ext = null;
+        if (p.foto_url) {
+          const filename = p.foto_url.split('/uploads/')[1];
+          if (filename) {
+            const filepath = path.join(uploadDir, filename);
+            if (fs.existsSync(filepath)) {
+              foto_base64 = fs.readFileSync(filepath).toString('base64');
+              foto_ext = path.extname(filename);
+            }
+          }
+        }
+        return { ...p, foto_base64, foto_ext };
+      })
+    }));
+
+    const data = JSON.stringify({ versao: '1.0', exportado_em: new Date().toISOString(), categorias: payload });
+    const filename = `cardapio-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(data);
+  } catch (error) {
+    console.error('Erro ao exportar cardápio:', error);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// Importar cardápio (modo: 'merge' ou 'replace')
+app.post('/api/admin/cardapio/importar', async (req, res) => {
+  try {
+    const { modo, categorias } = req.body;
+    if (!categorias || !Array.isArray(categorias)) {
+      return res.status(400).json({ error: 'Arquivo inválido: campo "categorias" não encontrado' });
+    }
+    const bar = await prisma.bar.findFirst();
+    if (!bar) return res.status(400).json({ error: 'Bar não configurado' });
+
+    if (modo === 'replace') {
+      const cats = await prisma.produtoCategoria.findMany({ where: { bar_id: bar.id } });
+      for (const cat of cats) {
+        await prisma.produto.deleteMany({ where: { categoria_id: cat.id } });
+      }
+      await prisma.produtoCategoria.deleteMany({ where: { bar_id: bar.id } });
+    }
+
+    const baseUrl = process.env.BASE_URL || 'https://aooba-api.onrender.com';
+
+    for (const cat of categorias) {
+      let categoria = await prisma.produtoCategoria.findFirst({
+        where: { nome: cat.nome, bar_id: bar.id }
+      });
+      if (!categoria) {
+        categoria = await prisma.produtoCategoria.create({
+          data: { nome: cat.nome, ordem: cat.ordem ?? 99, bar_id: bar.id }
+        });
+      }
+
+      for (const p of cat.produtos) {
+        let foto_url = null;
+        if (p.foto_base64 && p.foto_ext) {
+          const newFilename = `produto-${Date.now()}-${Math.round(Math.random() * 1e9)}${p.foto_ext}`;
+          const newPath = path.join(uploadDir, newFilename);
+          fs.writeFileSync(newPath, Buffer.from(p.foto_base64, 'base64'));
+          foto_url = `${baseUrl}/uploads/${newFilename}`;
+        }
+
+        await prisma.produto.create({
+          data: {
+            nome: p.nome,
+            descricao: p.descricao ?? null,
+            preco: p.preco,
+            categoria_id: categoria.id,
+            foto_url,
+            destaque: p.destaque ?? false,
+            status: p.status ?? 'ativo',
+            limite_escolhas: p.limite_escolhas ?? 0,
+            controlar_estoque: p.controlar_estoque ?? false,
+            estoque_atual: p.estoque_atual ?? 0,
+            estoque_minimo: p.estoque_minimo ?? 5,
+            opcoes: {
+              create: (p.opcoes ?? []).map(o => ({ nome: o.nome, acrescimo: o.acrescimo ?? 0 }))
+            }
+          }
+        });
+      }
+    }
+
+    await logAction(bar.id, null, 'IMPORTAR_CARDAPIO', { modo, total_categorias: categorias.length });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao importar cardápio:', error);
+    res.status(500).json({ error: 'Erro interno: ' + error.message });
+  }
+});
+
 // Retorna as mesas (Para View Garçom / Painel)
 app.get('/api/mesas', async (req, res) => {
   try {
