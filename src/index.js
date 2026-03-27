@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const spotifyService = require('./services/spotifyService');
 const xml2js = require('xml2js');
+const { verifyToken } = require('./auth');
 
 // Configuração do Multer (Upload de Imagens Local)
 const uploadDir = path.join(__dirname, '../uploads');
@@ -2453,7 +2454,7 @@ app.put('/api/admin/clientes/:id', async (req, res) => {
 });
 
 // Excluir cliente
-app.delete('/api/admin/clientes/:id', async (req, res) => {
+app.delete('/api/admin/clientes/:id', verifyToken, async (req, res) => {
   try {
     // Remove dependências antes de excluir o cliente
     const clienteId = req.params.id;
