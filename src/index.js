@@ -2815,6 +2815,42 @@ if (process.env.FRONTEND_DIST_PATH && fs.existsSync(process.env.FRONTEND_DIST_PA
   console.log(`🌐 Servindo frontend de: ${process.env.FRONTEND_DIST_PATH}`);
 }
 
-server.listen(PORT, () => {
+// Auto-seed: cria bar padrão se não existir
+async function ensureBarExists() {
+  try {
+    const existing = await prisma.bar.findFirst();
+    if (!existing) {
+      console.log('🌱 Nenhum bar encontrado, criando dados iniciais...');
+      const bar = await prisma.bar.create({
+        data: {
+          nome: 'AOOBA! BAR',
+          slug: 'aooba-bar',
+          mensagem_boas_vindas: 'Seja bem-vindo ao bar mais tecnológico da cidade.',
+          senha_master: '1234',
+          active: true,
+          aberto: true,
+        }
+      });
+      // Mesas
+      for (let i = 1; i <= 20; i++) {
+        await prisma.mesa.create({
+          data: { bar_id: bar.id, numero: i, qr_token: `pwd_${i}`, setor: 'interno' }
+        });
+      }
+      // Config fidelidade
+      await prisma.configFidelidade.create({
+        data: { bar_id: bar.id, pts_por_real: 1.0, pts_cadastro: 50, pts_musica_tocada: 10 }
+      });
+      console.log('✅ Bar, mesas e config criados com sucesso!');
+    } else {
+      console.log(`✅ Bar existente: ${existing.nome}`);
+    }
+  } catch (e) {
+    console.error('⚠️ Erro no auto-seed:', e.message);
+  }
+}
+
+server.listen(PORT, async () => {
   console.log(`🚀 AOOBA! Server running on http://localhost:${PORT}`);
+  await ensureBarExists();
 });
