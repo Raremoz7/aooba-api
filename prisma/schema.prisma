@@ -1,0 +1,431 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Bar {
+  id                   String             @id @default(uuid())
+  nome                 String
+  slug                 String             @unique
+  logo_url             String?
+  config_spotify       String?
+  mensagem_boas_vindas String?
+  
+  // Configurações Gerais (v3.0)
+  limite_pedidos       Int                @default(3)
+  tempo_inatividade    Int                @default(60) // minutos
+  senha_master         String?            @default("1234")
+  require_admin_login  Boolean            @default(false)
+  aberto               Boolean            @default(true)
+  chamar_garcom_ativo  Boolean            @default(false)
+  fidelidade_ativa     Boolean            @default(true)
+  // F1/F2: Dados fiscais
+  cnpj                 String?
+  endereco             String?
+  razao_social         String?
+
+  active               Boolean            @default(true)
+  mesas                Mesa[]
+  categorias           ProdutoCategoria[]
+  promocoes            Promocao[]
+  admins               AdminUser[]
+  fila_musica          FilaMusica[]
+  audit_logs           AuditLog[]
+  config_fidelidade    ConfigFidelidade?
+  garcons              Garcom[]
+  caixas               Caixa[]
+}
+
+model Mesa {
+  id           String         @id @default(uuid())
+  bar_id       String
+  numero       Int
+  nome_apelido String?
+  setor        String?        // interno/externo/mezanino
+  qr_token     String         @unique
+  status       String         @default("livre") // livre/ocupada/fechando
+  bar          Bar            @relation(fields: [bar_id], references: [id])
+  sessoes      Sessao[]
+  mensagens    MensagemMesa[]
+}
+
+model Cliente {
+  id                String            @id @default(uuid())
+  cpf_ou_telefone   String            @unique
+  nome              String
+  pontos_fidelidade Int               @default(0)
+  criado_em         DateTime          @default(now())
+  // F5: Cadastro completo
+  aniversario_dia   Int?
+  aniversario_mes   Int?
+  aceite_marketing  Boolean           @default(false)
+  ultimo_acesso     DateTime?
+  total_visitas     Int               @default(0)
+  total_gasto       Float             @default(0)
+  sessoes           Sessao[]
+  pontos            ClientePontos?
+  transacoes        TransacaoPontos[]
+  resgates          Resgate[]
+}
+
+model Sessao {
+  id                String           @id @default(uuid())
+  mesa_id           String
+  cliente_id        String
+  aberta_em         DateTime         @default(now())
+  fechada_em        DateTime?
+  total             Float            @default(0)
+  device_id         String?
+  mesa              Mesa             @relation(fields: [mesa_id], references: [id])
+  cliente           Cliente          @relation(fields: [cliente_id], references: [id])
+  pedidos           Pedido[]
+  sugestoes_musicas SugestaoMusica[]
+  transacoes_pontos TransacaoPontos[]
+  notas_fiscais     NotaFiscal[]
+  lancamentos_caixa LancamentoCaixa[]
+}
+
+model ProdutoCategoria {
+  id       String    @id @default(uuid())
+  bar_id   String
+  nome     String
+  ordem    Int       @default(0)
+  ativo    Boolean   @default(true)
+  bar      Bar       @relation(fields: [bar_id], references: [id])
+  produtos Produto[]
+}
+
+model Produto {
+  id             String          @id @default(uuid())
+  categoria_id   String
+  nome           String
+  descricao      String?
+  preco          Float
+  foto_url       String?
+  status         String          @default("ativo") // ativo/esgotado/inativo
+  destaque       Boolean         @default(false)
+  limite_escolhas Int            @default(0) // 0 = sem limites, 1 = radio button, >1 = checkboxes limitados
+  // F7: NF-e
+  codigo_ean        String?
+  preco_custo       Float?
+  // F3: Controle de estoque
+  controlar_estoque Boolean      @default(false)
+  estoque_atual     Int          @default(0)
+  estoque_minimo    Int          @default(5)
+  categoria      ProdutoCategoria @relation(fields: [categoria_id], references: [id])
+  versoes        ProdutoVersao[]
+  opcoes         ProdutoOpcao[]
+  itens_pedido   ItemPedido[]
+  promocoes      Promocao[]      @relation("ProdutoPromocao")
+  movimentacoes  MovimentacaoEstoque[]
+  alertas_estoque AlertaEstoque[]
+}
+
+model ProdutoVersao {
+  id         String   @id @default(uuid())
+  produto_id String
+  preco      Float
+  vigente_em DateTime @default(now())
+  produto    Produto  @relation(fields: [produto_id], references: [id])
+}
+
+model ProdutoOpcao {
+  id         String  @id @default(uuid())
+  produto_id String
+  nome       String  // ex: "Menta", "Morango", "Com Gelo"
+  acrescimo  Float   @default(0)
+  produto    Produto @relation(fields: [produto_id], references: [id], onDelete: Cascade)
+}
+
+model Pedido {
+  id           String       @id @default(uuid())
+  sessao_id    String
+  garcom_id    String?
+  status       String       @default("recebido") // recebido/preparando/pronto/entregue
+  criado_em    DateTime     @default(now())
+  sessao       Sessao       @relation(fields: [sessao_id], references: [id])
+  garcom       Garcom?      @relation(fields: [garcom_id], references: [id])
+  itens_pedido ItemPedido[]
+}
+
+model ItemPedido {
+  id                String  @id @default(uuid())
+  pedido_id         String
+  produto_id        String
+  quantidade        Int
+  preco_unitario    Float
+  observacao        String?
+  opcoes_escolhidas String?  // ex: "Menta, Limão, Maçã Verde"
+  pedido            Pedido  @relation(fields: [pedido_id], references: [id])
+  produto           Produto @relation(fields: [produto_id], references: [id])
+}
+
+model Promocao {
+  id            String    @id @default(uuid())
+  bar_id        String
+  titulo        String
+  mensagem      String
+  desconto_pct  Float
+  inicio        DateTime
+  fim           DateTime
+  ativo         Boolean   @default(true)
+  bar           Bar       @relation(fields: [bar_id], references: [id])
+  produtos_alvo Produto[] @relation("ProdutoPromocao")
+}
+
+model SugestaoMusica {
+  id               String   @id @default(uuid())
+  sessao_id        String
+  spotify_track_id String
+  nome             String
+  artista          String
+  duracao          String?  // ex: "3:45"
+  capa             String?
+  status           String   @default("pendente") // pendente/aprovada/rejeitada/playing/played
+  atualizado_em    DateTime @default(now()) @updatedAt
+  criado_em        DateTime @default(now())
+  sessao           Sessao   @relation(fields: [sessao_id], references: [id])
+}
+
+model FilaMusica {
+  id               String   @id @default(uuid())
+  bar_id           String
+  spotify_track_id String
+  nome             String
+  artista          String
+  duracao          String?
+  adicionada_em    DateTime @default(now())
+  tocou            Boolean  @default(false)
+  bar              Bar      @relation(fields: [bar_id], references: [id])
+}
+
+model Garcom {
+  id        String   @id @default(uuid())
+  bar_id    String
+  nome      String
+  pin       String   // código de 4 dígitos
+  ativo     Boolean  @default(true)
+  criado_em DateTime @default(now())
+  bar       Bar      @relation(fields: [bar_id], references: [id])
+  pedidos   Pedido[]
+}
+
+model AdminUser {
+  id         String   @id @default(uuid())
+  bar_id     String
+  email      String   @unique
+  senha_hash String
+  nome       String
+  role       String   @default("staff") // owner/manager/staff
+  criado_em  DateTime @default(now())
+  bar        Bar      @relation(fields: [bar_id], references: [id])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  bar_id        String
+  admin_id      String
+  acao          String
+  detalhes_json String?
+  criado_em     DateTime @default(now())
+  bar           Bar      @relation(fields: [bar_id], references: [id])
+}
+
+model Notificacao {
+  id        String   @id @default(uuid())
+  tipo      String
+  titulo    String
+  mensagem  String
+  lida      Boolean  @default(false)
+  criado_em DateTime @default(now())
+}
+
+model MensagemMesa {
+  id        String   @id @default(uuid())
+  mesa_id   String
+  mensagem  String
+  expira_em DateTime
+  criado_em DateTime @default(now())
+  mesa      Mesa     @relation(fields: [mesa_id], references: [id])
+}
+
+model ClientePontos {
+  id           String   @id @default(uuid())
+  cliente_id   String   @unique
+  bar_id       String
+  pontos_total Int      @default(0)
+  tier         String   @default("Frequentador")
+  atualizado_em DateTime @default(now())
+  cliente      Cliente  @relation(fields: [cliente_id], references: [id])
+}
+
+model TransacaoPontos {
+  id         String   @id @default(uuid())
+  cliente_id String
+  sessao_id  String?
+  tipo       String   // compra/bonus/resgate
+  pontos     Int
+  descricao  String?
+  criado_em  DateTime @default(now())
+  cliente    Cliente  @relation(fields: [cliente_id], references: [id])
+  sessao     Sessao?  @relation(fields: [sessao_id], references: [id])
+}
+
+model ConfigFidelidade {
+  id                 String  @id @default(uuid())
+  bar_id             String  @unique
+  pts_por_real       Float   @default(1)
+  pts_cadastro       Int     @default(50)
+  pts_musica_tocada  Int     @default(10)
+  threshold_habitue  Int     @default(500)
+  threshold_vip      Int     @default(1500)
+  bar                Bar     @relation(fields: [bar_id], references: [id])
+}
+
+model Recompensa {
+  id              String            @id @default(uuid())
+  nome            String
+  descricao       String?
+  pontos_custo    Int
+  imagem_url      String?
+  status          String            @default("ativo") // ativo, inativo
+  criado_em       DateTime          @default(now())
+  resgates        Resgate[]
+}
+
+model Resgate {
+  id              String            @id @default(uuid())
+  cliente_id      String
+  recompensa_id   String
+  sessao_id       String?
+  pontos_gastos   Int
+  status          String            @default("pendente") // pendente, entregue, cancelado
+  criado_em       DateTime          @default(now())
+
+  cliente         Cliente           @relation(fields: [cliente_id], references: [id])
+  recompensa      Recompensa        @relation(fields: [recompensa_id], references: [id])
+}
+
+// F3: Gestão de Estoque
+model MovimentacaoEstoque {
+  id             String   @id @default(uuid())
+  produto_id     String
+  tipo           String   // "entrada" | "venda" | "ajuste"
+  quantidade     Int
+  estoque_antes  Int
+  estoque_depois Int
+  motivo         String?
+  criado_em      DateTime @default(now())
+  produto        Produto  @relation(fields: [produto_id], references: [id])
+}
+
+// F4: Alertas de Estoque
+model AlertaEstoque {
+  id         String   @id @default(uuid())
+  produto_id String
+  tipo       String   // "baixo" | "esgotado" | "reabastecido"
+  mensagem   String
+  lido       Boolean  @default(false)
+  criado_em  DateTime @default(now())
+  produto    Produto  @relation(fields: [produto_id], references: [id])
+}
+
+// F1: Fechamento de Caixa
+model Caixa {
+  id              String            @id @default(uuid())
+  bar_id          String
+  aberto_por      String            // admin name or id
+  fechado_por     String?
+  aberto_em       DateTime          @default(now())
+  fechado_em      DateTime?
+  saldo_inicial   Float             @default(0)
+  total_vendas    Float             @default(0)
+  total_descontos Float             @default(0)
+  total_couvert   Float             @default(0)
+  total_cancelamentos Float         @default(0)
+  total_liquido   Float             @default(0)
+  mesas_atendidas Int               @default(0)
+  ticket_medio    Float             @default(0)
+  status          String            @default("aberto") // aberto | fechado
+  observacao      String?
+  bar             Bar               @relation(fields: [bar_id], references: [id])
+  lancamentos     LancamentoCaixa[]
+}
+
+model LancamentoCaixa {
+  id          String   @id @default(uuid())
+  caixa_id    String
+  sessao_id   String?
+  tipo        String   // "venda" | "sangria" | "reforco" | "despesa"
+  descricao   String?
+  valor       Float
+  metodo_pgto String?  // "dinheiro" | "pix" | "credito" | "debito"
+  criado_em   DateTime @default(now())
+  caixa       Caixa    @relation(fields: [caixa_id], references: [id])
+  sessao      Sessao?  @relation(fields: [sessao_id], references: [id])
+}
+
+// F2: Nota Fiscal / Cupom
+model NotaFiscal {
+  id          String   @id @default(uuid())
+  sessao_id   String
+  numero      Int      @default(0)
+  valor_total Float
+  desconto    Float    @default(0)
+  couvert     Float    @default(0)
+  metodo_pgto String?
+  itens_json  String   // JSON string dos itens
+  emitida_em  DateTime @default(now())
+  sessao      Sessao   @relation(fields: [sessao_id], references: [id])
+}
+
+// F6: CRM — Campanhas
+model CampanhaCRM {
+  id          String   @id @default(uuid())
+  bar_id      String
+  nome        String
+  tipo        String   // "aniversario" | "inatividade" | "vip" | "geral"
+  mensagem    String
+  desconto_pct Float?
+  ativa       Boolean  @default(true)
+  criado_em   DateTime @default(now())
+}
+
+// F6: Config Promoção Aniversário
+model ConfigAniversario {
+  id           String  @id @default(uuid())
+  bar_id       String  @unique
+  ativo        Boolean @default(true)
+  desconto_pct Float   @default(10)
+  mensagem     String  @default("Feliz aniversario! Ganhe desconto especial.")
+}
+
+// F7: Importação NF-e
+model ImportacaoNFe {
+  id            String   @id @default(uuid())
+  bar_id        String
+  chave_nfe     String?
+  fornecedor    String?
+  numero_nf     String?
+  valor_total   Float?
+  data_emissao  DateTime?
+  itens_total   Int      @default(0)
+  criado_em     DateTime @default(now())
+  itens         ItemImportacaoNFe[]
+}
+
+model ItemImportacaoNFe {
+  id             String   @id @default(uuid())
+  importacao_id  String
+  codigo_ean     String?
+  descricao      String
+  quantidade     Float
+  valor_unitario Float
+  unidade        String?
+  produto_id     String?  // produto vinculado (se houver match)
+  importacao     ImportacaoNFe @relation(fields: [importacao_id], references: [id])
+}
