@@ -1072,7 +1072,7 @@ app.post('/api/admin/cardapio/importar', async (req, res) => {
       }
 
       for (const p of cat.produtos) {
-        let foto_url = null;
+        let foto_url = p.foto_url || null;
         if (p.foto_base64 && p.foto_ext) {
           const newFilename = `produto-${Date.now()}-${Math.round(Math.random() * 1e9)}${p.foto_ext}`;
           const newPath = path.join(uploadDir, newFilename);
